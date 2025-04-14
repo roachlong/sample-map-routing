@@ -71,6 +71,8 @@ class GraphEnv:
         # may conflict with other incentives we use to find the goal.
         #######
         reward = (prev_dist - new_dist)  # distance improvement
+        if reward < 0:
+            reward *= 2; # punishment for moving further away
 
         reward -= 0.5  # step penalty
         # if next_pos in self.path:  # optional A* path bonus
@@ -80,7 +82,7 @@ class GraphEnv:
 
         edge = (self.agent_pos, next_pos)
         if edge in self.visited_edges:
-            reward -= 5  # discourage repeat
+            reward -= 10  # discourage repeat
         else:
             self.visited_edges.add(edge)
     
