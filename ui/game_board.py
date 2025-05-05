@@ -176,10 +176,10 @@ def run_game(grid, sat_image, bounds, connections, screen_size, grid_size, scale
                 if len(state_history) < rl_agent.sequence_length:
                     continue  # ✅ WAIT until enough states collected
 
-                state_seq = np.stack(state_history, axis=0)  # ✅ BUILD SEQUENCE
-                valid_actions = neighbor_map[agent_pos]
+                state_seq = np.stack(state_history, axis=0)  # Shape: (sequence_length, state_size)
                 action_idx = rl_agent.act(state_seq)
 
+                valid_actions = neighbor_map[agent_pos]
                 if action_idx >= len(valid_actions):
                     action_idx = np.random.randint(len(valid_actions))
 

@@ -37,7 +37,8 @@ class GraphEnv:
     def _get_state(self):
         dx = self.goal_pos[0] - self.agent_pos[0]
         dy = self.goal_pos[1] - self.agent_pos[1]
-        return np.array([self.agent_pos[0], self.agent_pos[1], dx, dy], dtype=np.float32) / GRID_SIZE
+        visited_count = len(self.visited_edges) / (GRID_SIZE * GRID_SIZE)
+        return np.array([self.agent_pos[0], self.agent_pos[1], dx, dy, visited_count], dtype=np.float32) / GRID_SIZE
 
     def _random_valid(self, exclude=None):
         while True:
@@ -84,11 +85,11 @@ class GraphEnv:
         # if next_pos in self.path:  # optional A* path bonus
         #     reward += 1 # this reward will confuse the agent
         if next_pos == self.goal_pos:
-            reward += 100
+            reward += 200
 
         edge = (self.agent_pos, next_pos)
         if edge in self.visited_edges:
-            reward -= 10  # discourage repeat
+            reward -= 5  # discourage repeat
         else:
             self.visited_edges.add(edge)
     
@@ -123,7 +124,7 @@ def rollout_action(agent, env, state_history, depth=3):
             if len(temp_history) < agent.sequence_length:
                 break
 
-            state_seq = np.stack(temp_history, axis=0)
+            state_seq = np.stack(temp_history, axis=0)  # Shape: (sequence_length, state_size)
             action = agent.act(state_seq)
             neighbors_next = env.neighbor_map[pos]
             if not neighbors_next:
@@ -143,7 +144,7 @@ def rollout_action(agent, env, state_history, depth=3):
             else:
                 temp_visited.add(edge)
 
-            total_reward += reward
+            total_reward += (agent.gamma ** step) * reward  # Discounted reward
             pos = next_next
 
         if total_reward > best_score:
@@ -160,7 +161,7 @@ def train_dqn(grid, connections):
         neighbor_map[b].append(a)
 
     env = GraphEnv(grid, neighbor_map)
-    agent = DQNAgent(state_size=4, action_size=8)
+    agent = DQNAgent(state_size=5, action_size=8)
 
     try:
         agent.load(MODEL_PATH)
@@ -171,24 +172,31 @@ def train_dqn(grid, connections):
     for ep in range(EPISODES):
         state = env.reset()
         state_history = deque(maxlen=agent.sequence_length)
+        next_state_history = deque(maxlen=agent.sequence_length)
         state_history.append(state)
+        next_state_history.append(state)
         done = False
         total_reward = 0
         start_time = time.time()
 
         while not done:
             if len(state_history) < agent.sequence_length:
+                # Pad state_history if it's too short
+                while len(state_history) < agent.sequence_length:
+                    state_history.append(state_history[-1])  # Duplicate the last state
+                    next_state_history.append(next_state_history[-1])
                 action = random.randint(0, agent.action_size - 1)
             else:
                 state_seq = np.stack(state_history, axis=0)
-                action = rollout_action(agent, env, state_history, depth=3)
+                action = agent.act(state_seq)
 
             next_state, reward, done, _ = env.step(action)
             state_history.append(next_state)
+            next_state_history.append(next_state)
 
-            if len(state_history) == agent.sequence_length:
-                state_seq = np.stack(list(state_history)[:-1], axis=0)
-                next_state_seq = np.stack(state_history, axis=0)
+            if len(state_history) == agent.sequence_length and len(next_state_history) == agent.sequence_length:
+                state_seq = np.stack(state_history, axis=0)
+                next_state_seq = np.stack(next_state_history, axis=0)
                 agent.remember(state_seq, action, reward, next_state_seq, done)
 
             for _ in range(3):
