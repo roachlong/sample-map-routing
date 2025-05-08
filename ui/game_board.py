@@ -1,7 +1,7 @@
 import pygame
 import numpy as np
 import scipy.ndimage
-from collections import defaultdict
+from collections import defaultdict, deque
 from ai.path_finder import a_star
 from ai.dqn_agent import DQNAgent
 import time
@@ -117,6 +117,7 @@ def run_game(grid, sat_image, bounds, connections, screen_size, grid_size, scale
     minimap_rect = pygame.Rect(screen_size - minimap_size - 10, 10, minimap_size, minimap_size)
     show_minimap = True
 
+    state_history = deque(maxlen=rl_agent.sequence_length)
     clock = pygame.time.Clock()
     running = True
     while running:
@@ -167,15 +168,22 @@ def run_game(grid, sat_image, bounds, connections, screen_size, grid_size, scale
         current_time = time.time()
         if use_rl_agent:
             if agent_pos and goal_pos and current_time - last_step_time > step_delay:
-                dx, dy = goal_pos[0] - agent_pos[0], goal_pos[1] - agent_pos[1]
+                dx = goal_pos[0] - agent_pos[0]
+                dy = goal_pos[1] - agent_pos[1]
                 state = np.array([agent_pos[0], agent_pos[1], dx, dy], dtype=np.float32) / grid_size
-                valid_actions = neighbor_map[agent_pos]
+                state_history.append(state)  # ✅ ADD TO HISTORY
 
-                action_idx = rl_agent.act(state)
+                if len(state_history) < rl_agent.sequence_length:
+                    continue  # ✅ WAIT until enough states collected
+
+                state_seq = np.stack(state_history, axis=0)  # Shape: (sequence_length, state_size)
+                action_idx = rl_agent.act(state_seq)
+
+                valid_actions = neighbor_map[agent_pos]
                 if action_idx >= len(valid_actions):
                     action_idx = np.random.randint(len(valid_actions))
-                next_pos = valid_actions[action_idx]
 
+                next_pos = valid_actions[action_idx]
                 agent_pos = next_pos
                 path_trace.append(agent_pos)
                 last_step_time = current_time
@@ -187,6 +195,7 @@ def run_game(grid, sat_image, bounds, connections, screen_size, grid_size, scale
                     click_mode = 'goal'
                     trip_count += 1
                     last_step_time = time.time()
+                    state_history.clear()  # ✅ Reset sequence after goal
 
         else:
             if path and path_index < len(path) and current_time - last_step_time > step_delay:

@@ -1,7 +1,7 @@
 from util.map_utils import fetch_grid_and_bounds
 from ai.path_finder import a_star
 from ai.dqn_agent import DQNAgent
-from collections import defaultdict
+from collections import defaultdict, deque
 import numpy as np
 import os
 import random
@@ -17,6 +17,7 @@ MODEL_PATH = "models/dqn_model.weights.h5"
 # --- ENVIRONMENT WRAPPER ---
 class GraphEnv:
     def __init__(self, grid, neighbor_map):
+        self.loop_memory = deque(maxlen=10)  # Track recent agent positions to detect loops
         self.grid = grid
         self.neighbor_map = neighbor_map
         self.agent_pos = self._random_valid()
@@ -24,7 +25,7 @@ class GraphEnv:
         self.path = None
         self.visited_edges = None
         self.steps = 0
-        self.max_steps = 500
+        self.max_steps = 100
 
     def reset(self):
         self.goal_pos = self._random_valid(exclude=self.agent_pos)
@@ -36,7 +37,8 @@ class GraphEnv:
     def _get_state(self):
         dx = self.goal_pos[0] - self.agent_pos[0]
         dy = self.goal_pos[1] - self.agent_pos[1]
-        return np.array([self.agent_pos[0], self.agent_pos[1], dx, dy], dtype=np.float32) / GRID_SIZE
+        visited_count = len(self.visited_edges) / (GRID_SIZE * GRID_SIZE)
+        return np.array([self.agent_pos[0], self.agent_pos[1], dx, dy, visited_count], dtype=np.float32) / GRID_SIZE
 
     def _random_valid(self, exclude=None):
         while True:
@@ -46,6 +48,10 @@ class GraphEnv:
 
     def step(self, action_idx):
         neighbors = self.neighbor_map[self.agent_pos]
+        self.loop_memory.append(self.agent_pos)
+        loop_penalty = 0
+        if len(set(self.loop_memory)) <= 3:
+            loop_penalty = -25  # Strong penalty if looping
         if not neighbors:
             return self._get_state(), -1, True, {}
 
@@ -75,14 +81,15 @@ class GraphEnv:
             reward *= 2; # punishment for moving further away
 
         reward -= 0.5  # step penalty
+        reward += loop_penalty  # Apply loop penalty if detected
         # if next_pos in self.path:  # optional A* path bonus
         #     reward += 1 # this reward will confuse the agent
         if next_pos == self.goal_pos:
-            reward += 100
+            reward += 500
 
         edge = (self.agent_pos, next_pos)
         if edge in self.visited_edges:
-            reward -= 10  # discourage repeat
+            reward -= 5  # discourage repeat
         else:
             self.visited_edges.add(edge)
     
@@ -90,6 +97,61 @@ class GraphEnv:
         self.steps += 1
         done = self.agent_pos == self.goal_pos or self.steps >= self.max_steps
         return self._get_state(), reward, done, {}
+
+
+def rollout_action(agent, env, state_history, depth=5):
+    """Simulates each possible action and scores based on future reward."""
+    best_action = 0
+    best_score = -float('inf')
+
+    current_pos = env.agent_pos
+    neighbors = env.neighbor_map[current_pos]
+    if not neighbors:
+        return 0
+
+    for i, next_pos in enumerate(neighbors):
+        total_reward = 0
+        pos = next_pos
+        temp_visited = set(env.visited_edges)
+
+        for step in range(depth):
+            dx = env.goal_pos[0] - pos[0]
+            dy = env.goal_pos[1] - pos[1]
+            state = np.array([pos[0], pos[1], dx, dy], dtype=np.float32) / GRID_SIZE
+
+            temp_history = deque(state_history, maxlen=agent.sequence_length)
+            temp_history.append(state)
+            if len(temp_history) < agent.sequence_length:
+                break
+
+            state_seq = np.stack(temp_history, axis=0)  # Shape: (sequence_length, state_size)
+            action = agent.act(state_seq)
+            neighbors_next = env.neighbor_map[pos]
+            if not neighbors_next:
+                break
+
+            next_next = neighbors_next[action % len(neighbors_next)]
+            prev_dist = np.linalg.norm(np.array(pos) - np.array(env.goal_pos))
+            new_dist = np.linalg.norm(np.array(next_next) - np.array(env.goal_pos))
+            reward = (prev_dist - new_dist)
+            if reward < 0:
+                reward *= 2
+            reward -= 0.5
+
+            edge = (pos, next_next)
+            if edge in temp_visited:
+                reward -= 10
+            else:
+                temp_visited.add(edge)
+
+            total_reward += (agent.gamma ** step) * reward  # Discounted reward
+            pos = next_next
+
+        if total_reward > best_score:
+            best_score = total_reward
+            best_action = i
+
+    return best_action
 
 # --- TRAINING LOOP ---
 def train_dqn(grid, connections):
@@ -99,7 +161,7 @@ def train_dqn(grid, connections):
         neighbor_map[b].append(a)
 
     env = GraphEnv(grid, neighbor_map)
-    agent = DQNAgent(state_size=4, action_size=8)
+    agent = DQNAgent(state_size=5, action_size=8)
 
     try:
         agent.load(MODEL_PATH)
@@ -109,21 +171,40 @@ def train_dqn(grid, connections):
 
     for ep in range(EPISODES):
         state = env.reset()
+        state_history = deque(maxlen=agent.sequence_length)
+        next_state_history = deque(maxlen=agent.sequence_length)
+        state_history.append(state)
+        next_state_history.append(state)
         done = False
         total_reward = 0
         start_time = time.time()
 
         while not done:
-            action = agent.act(state)
+            if len(state_history) < agent.sequence_length:
+                # Pad state_history if it's too short
+                while len(state_history) < agent.sequence_length:
+                    state_history.append(state_history[-1])  # Duplicate the last state
+                    next_state_history.append(next_state_history[-1])
+                action = random.randint(0, agent.action_size - 1)
+            else:
+                state_seq = np.stack(state_history, axis=0)
+                action = agent.act(state_seq)
+
             next_state, reward, done, _ = env.step(action)
-            agent.remember(state, action, reward, next_state, done)
+            state_history.append(next_state)
+            next_state_history.append(next_state)
+
+            if len(state_history) == agent.sequence_length and len(next_state_history) == agent.sequence_length:
+                state_seq = np.stack(state_history, axis=0)
+                next_state_seq = np.stack(next_state_history, axis=0)
+                agent.remember(state_seq, action, reward, next_state_seq, done)
+
             for _ in range(3):
                 agent.replay(batch_size=32)
-            state = next_state
+
             total_reward += reward
-            if env.steps % 5 == 0:
-                sys.stdout.write(".")
-                sys.stdout.flush()
+            sys.stdout.write(".")
+            sys.stdout.flush()
 
         end_time = time.time()
         elapsed_time = end_time - start_time
