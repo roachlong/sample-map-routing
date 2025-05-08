@@ -9,8 +9,8 @@ class DQNAgent:
         self.state_size = state_size  # e.g. 4: [ax, ay, gx, gy]
         self.sequence_length = sequence_length  # lookback window
         self.action_size = action_size  # number of available actions
-        self.memory = deque(maxlen=2000)
-        self.gamma = 0.95    # discount rate
+        self.memory = deque(maxlen=10000)
+        self.gamma = 0.9    # discount rate
         self.epsilon = 1.0   # exploration rate
         self.epsilon_min = 0.00
         self.epsilon_decay = 0.995
@@ -36,9 +36,9 @@ class DQNAgent:
         #######
         model = tf.keras.Sequential([
             tf.keras.layers.Input(shape=(self.sequence_length, self.state_size)),
-            tf.keras.layers.GRU(128, return_sequences=True, dropout=0.2),
-            tf.keras.layers.GRU(64, dropout=0.2),
-            tf.keras.layers.Dense(64, activation='relu'),
+            tf.keras.layers.GRU(256, return_sequences=True, dropout=0.2),
+            tf.keras.layers.GRU(128, dropout=0.2),
+            tf.keras.layers.Dense(128, activation='relu'),
             tf.keras.layers.Dense(self.action_size, activation='linear')
         ])
         model.compile(loss='mse', optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate))
@@ -73,9 +73,9 @@ class DQNAgent:
 
     def _epsilon_schedule(self):
         # Custom schedule: slower decay at first, faster later
-        if self.steps < 1000:
+        if self.steps < 2000:
             return self.epsilon * 0.9995  # Slower decay
-        elif self.steps < 5000:
+        elif self.steps < 10000:
             return self.epsilon * 0.995
         else:
             return self.epsilon * 0.99

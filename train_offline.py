@@ -25,7 +25,7 @@ class GraphEnv:
         self.path = None
         self.visited_edges = None
         self.steps = 0
-        self.max_steps = 50
+        self.max_steps = 100
 
     def reset(self):
         self.goal_pos = self._random_valid(exclude=self.agent_pos)
@@ -85,7 +85,7 @@ class GraphEnv:
         # if next_pos in self.path:  # optional A* path bonus
         #     reward += 1 # this reward will confuse the agent
         if next_pos == self.goal_pos:
-            reward += 200
+            reward += 500
 
         edge = (self.agent_pos, next_pos)
         if edge in self.visited_edges:
@@ -99,7 +99,7 @@ class GraphEnv:
         return self._get_state(), reward, done, {}
 
 
-def rollout_action(agent, env, state_history, depth=3):
+def rollout_action(agent, env, state_history, depth=5):
     """Simulates each possible action and scores based on future reward."""
     best_action = 0
     best_score = -float('inf')
