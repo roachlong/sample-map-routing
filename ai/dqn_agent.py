@@ -73,12 +73,12 @@ class DQNAgent:
 
     def _epsilon_schedule(self):
         # Custom schedule: slower decay at first, faster later
-        if self.steps < 2000:
-            return self.epsilon * 0.9995  # Slower decay
-        elif self.steps < 10000:
-            return self.epsilon * 0.995
+        if self.steps < 10000:
+            return self.epsilon * 0.99995  # Slower decay
+        elif self.steps < 50000:
+            return self.epsilon * 0.9995
         else:
-            return self.epsilon * 0.99
+            return self.epsilon * 0.995
 
     def save(self, name):
         self.model.save_weights(name)

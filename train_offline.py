@@ -78,7 +78,7 @@ class GraphEnv:
         #######
         reward = (prev_dist - new_dist)  # distance improvement
         if reward < 0:
-            reward *= 2; # punishment for moving further away
+            reward *= 1.2; # punishment for moving further away
 
         reward -= 0.5  # step penalty
         reward += loop_penalty  # Apply loop penalty if detected
