@@ -9,15 +9,15 @@ import sys
 import time
 
 ADDRESS = "Main Street, Winnett MT 59087, USA"
-DISTANCE = 1000
-GRID_SIZE = 250
-EPISODES = 100
-MODEL_PATH = "models/dqn_model.weights.h5"
+DISTANCE = 250
+GRID_SIZE = int(DISTANCE / 2)  # 1 cell per 2 meters
+EPISODES = 89
+MODEL_PATH = "models/dqn_model_simplified.weights.h5"
 
 # --- ENVIRONMENT WRAPPER ---
 class GraphEnv:
     def __init__(self, grid, neighbor_map):
-        self.loop_memory = deque(maxlen=10)  # Track recent agent positions to detect loops
+        # self.loop_memory = deque(maxlen=10)  # Track recent agent positions to detect loops
         self.grid = grid
         self.neighbor_map = neighbor_map
         self.agent_pos = self._random_valid()
@@ -25,7 +25,7 @@ class GraphEnv:
         self.path = None
         self.visited_edges = None
         self.steps = 0
-        self.max_steps = 100
+        self.max_steps = 1000
 
     def reset(self):
         self.goal_pos = self._random_valid(exclude=self.agent_pos)
@@ -37,8 +37,8 @@ class GraphEnv:
     def _get_state(self):
         dx = self.goal_pos[0] - self.agent_pos[0]
         dy = self.goal_pos[1] - self.agent_pos[1]
-        visited_count = len(self.visited_edges) / (GRID_SIZE * GRID_SIZE)
-        return np.array([self.agent_pos[0], self.agent_pos[1], dx, dy, visited_count], dtype=np.float32) / GRID_SIZE
+        # visited_count = len(self.visited_edges) / (GRID_SIZE * GRID_SIZE)
+        return np.array([self.agent_pos[0], self.agent_pos[1], dx, dy], dtype=np.float32) / GRID_SIZE
 
     def _random_valid(self, exclude=None):
         while True:
@@ -48,16 +48,16 @@ class GraphEnv:
 
     def step(self, action_idx):
         neighbors = self.neighbor_map[self.agent_pos]
-        self.loop_memory.append(self.agent_pos)
-        loop_penalty = 0
-        if len(set(self.loop_memory)) <= 3:
-            loop_penalty = -25  # Strong penalty if looping
+        # self.loop_memory.append(self.agent_pos)
+        # loop_penalty = 0
+        # if len(set(self.loop_memory)) <= 3:
+        #     loop_penalty = -25  # Strong penalty if looping
         if not neighbors:
             return self._get_state(), -1, True, {}
 
         next_pos = neighbors[action_idx % len(neighbors)]
-        prev_dist = np.linalg.norm(np.array(self.agent_pos) - np.array(self.goal_pos))
-        new_dist = np.linalg.norm(np.array(next_pos) - np.array(self.goal_pos))
+        # prev_dist = np.linalg.norm(np.array(self.agent_pos) - np.array(self.goal_pos))
+        # new_dist = np.linalg.norm(np.array(next_pos) - np.array(self.goal_pos))
 
         #######
         # Each step the agent takes leads to an outcome
@@ -76,20 +76,20 @@ class GraphEnv:
         # i.e. we don't reward for following the A* path because it
         # may conflict with other incentives we use to find the goal.
         #######
-        reward = (prev_dist - new_dist)  # distance improvement
-        if reward < 0:
-            reward *= 1.2; # punishment for moving further away
+        # reward = (prev_dist - new_dist)  # distance improvement
+        # if reward < 0:
+        #     reward *= 1.2; # punishment for moving further away
 
-        reward -= 0.5  # step penalty
-        reward += loop_penalty  # Apply loop penalty if detected
+        reward = -0.5  # step penalty
+        # reward += loop_penalty  # Apply loop penalty if detected
         # if next_pos in self.path:  # optional A* path bonus
         #     reward += 1 # this reward will confuse the agent
         if next_pos == self.goal_pos:
-            reward += 500
+            reward += 100
 
         edge = (self.agent_pos, next_pos)
         if edge in self.visited_edges:
-            reward -= 5  # discourage repeat
+            reward -= 1  # discourage repeat
         else:
             self.visited_edges.add(edge)
     
@@ -161,11 +161,16 @@ def train_dqn(grid, connections):
         neighbor_map[b].append(a)
 
     env = GraphEnv(grid, neighbor_map)
-    agent = DQNAgent(state_size=5, action_size=8)
+    agent = DQNAgent(state_size=4, action_size=8)
 
     try:
         agent.load(MODEL_PATH)
         print("✅ Loaded DQN model from file.")
+        meta = np.load("models/agent_meta.npy", allow_pickle=True).item()
+        agent.epsilon = meta.get("epsilon", 1.0)
+        agent.steps = meta.get("steps", 0)
+        agent.episodes = meta.get("episodes", 0)
+        print("✅ Loaded metadata values from file.")
     except:
         print("⚠️ No pre-trained model found. Starting fresh.")
 
@@ -208,10 +213,12 @@ def train_dqn(grid, connections):
 
         end_time = time.time()
         elapsed_time = end_time - start_time
+        agent.episodes += 1
         print(f"\nEpisode {ep+1}/{EPISODES} - Total reward: {total_reward:.2f} - Epsilon: {agent.epsilon:.3f} - Time (min): {elapsed_time/60:.2f} - Steps: {env.steps}")
 
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
     agent.save(MODEL_PATH)
+    np.save("models/agent_meta.npy", {"epsilon": agent.epsilon, "steps": agent.steps, "episodes": agent.episodes})
     print("✅ Model saved to", MODEL_PATH)
 
 

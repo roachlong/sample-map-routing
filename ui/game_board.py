@@ -20,8 +20,8 @@ def grid_to_latlon(i, j, grid_size, bounds):
 def grid_to_pixel(i, j, grid_size, image_width, image_height, bounds):
     lat, lon = grid_to_latlon(i, j, grid_size, bounds)
     north, south, east, west = bounds
-    x = (lon - west) / (east - west) * (image_width - 1)
-    y = (lat - south) / (north - south) * (image_height - 1)
+    x = (lon - west) / (east - west) * image_width
+    y = (lat - south) / (north - south) * image_height
     return x, y
 
 def scale_centered_on_mouse(mouse_pos, old_scale, new_scale, offset_x, offset_y):
@@ -64,9 +64,13 @@ def find_closest_node(grid, px, py):
     return (int(indices[0][py_flipped, px]), int(indices[1][py_flipped, px]))
                 
 # --- MAIN GAME LOOP ---
-def run_game(grid, sat_image, bounds, connections, screen_size, grid_size, scale=1.0):
+def run_game(grid, sat_image, bounds, connections, grid_size, scale=1.0):
     pygame.init()
-    screen = pygame.display.set_mode((screen_size, screen_size))
+    sat_surface = pygame.image.fromstring(sat_image.tobytes(), sat_image.size, sat_image.mode)
+    image_width, image_height = sat_surface.get_width(), sat_surface.get_height()
+    window_width = min(int(image_width * scale), 800)
+    window_height = min(int(image_height * scale), 800)
+    screen = pygame.display.set_mode((window_width, window_height))
     pygame.display.set_caption("Zoomable Satellite UI - Wayne, NJ")
 
     colors = {
@@ -96,7 +100,7 @@ def run_game(grid, sat_image, bounds, connections, screen_size, grid_size, scale
     path_index = 0
 
     use_rl_agent = True
-    model_path = "models/dqn_model.weights.h5"
+    model_path = "models/dqn_model_simplified.weights.h5"
     rl_agent = DQNAgent(state_size=4, action_size=8)  # max 8 neighbors assumed
     rl_agent.epsilon = 0.0  # inference only
 
@@ -109,13 +113,11 @@ def run_game(grid, sat_image, bounds, connections, screen_size, grid_size, scale
     step_delay = 0.1  # seconds between steps
     pause_duration = 1.5  # seconds to pause at goal
     last_step_time = time.time()
-    
-    sat_surface = pygame.image.fromstring(sat_image.tobytes(), sat_image.size, sat_image.mode)
 
-    minimap_size = 150
+    minimap_size = int(window_width / 4)
     minimap_surface = pygame.transform.smoothscale(sat_surface, (minimap_size, minimap_size))
-    minimap_rect = pygame.Rect(screen_size - minimap_size - 10, 10, minimap_size, minimap_size)
-    show_minimap = True
+    minimap_rect = pygame.Rect(window_width - minimap_size - 10, 10, minimap_size, minimap_size)
+    show_minimap = False
 
     state_history = deque(maxlen=rl_agent.sequence_length)
     clock = pygame.time.Clock()
@@ -215,7 +217,7 @@ def run_game(grid, sat_image, bounds, connections, screen_size, grid_size, scale
         # Drawing code
         scaled_img = pygame.transform.smoothscale(sat_surface,
             (int(sat_surface.get_width() * scale), int(sat_surface.get_height() * scale)))
-        offset_x, offset_y = clamp_offset(offset_x, offset_y, scale, sat_surface.get_width(), sat_surface.get_height(), screen_size, screen_size)
+        offset_x, offset_y = clamp_offset(offset_x, offset_y, scale, sat_surface.get_width(), sat_surface.get_height(), window_width, window_height)
 
         screen.blit(scaled_img, (offset_x, offset_y))
 
@@ -244,8 +246,8 @@ def run_game(grid, sat_image, bounds, connections, screen_size, grid_size, scale
             gx, gy = grid_to_pixel(goal_pos[0], goal_pos[1], grid_size, sat_surface.get_width(), sat_surface.get_height(), bounds)
 
         # Auto-pan to keep agent centered in view
-        screen_center_x = screen_size / 2
-        screen_center_y = screen_size / 2
+        screen_center_x = window_width / 2
+        screen_center_y = window_height / 2
 
         # Smooth auto-pan toward the agent
         pan_speed = 0.1  # 0.0 = no movement, 1.0 = instant
@@ -254,7 +256,7 @@ def run_game(grid, sat_image, bounds, connections, screen_size, grid_size, scale
         offset_x += (target_offset_x - offset_x) * pan_speed
         offset_y += (target_offset_y - offset_y) * pan_speed
 
-        offset_x, offset_y = clamp_offset(offset_x, offset_y, scale, sat_surface.get_width(), sat_surface.get_height(), screen_size, screen_size)
+        offset_x, offset_y = clamp_offset(offset_x, offset_y, scale, sat_surface.get_width(), sat_surface.get_height(), window_width, window_height)
 
         pygame.draw.circle(screen, colors["agent"], (int(ax * scale + offset_x), int(ay * scale + offset_y)), 6)
         if flash_toggle or path_index < len(path):
@@ -278,8 +280,8 @@ def run_game(grid, sat_image, bounds, connections, screen_size, grid_size, scale
             pygame.draw.circle(screen, colors["goal"], (minimap_rect.x + mini_gx, minimap_rect.y + mini_gy), 3)
 
             # Draw viewport rectangle
-            view_w = screen_size / (sat_surface.get_width() * scale) * minimap_size
-            view_h = screen_size / (sat_surface.get_height() * scale) * minimap_size
+            view_w = window_width / (sat_surface.get_width() * scale) * minimap_size
+            view_h = window_height / (sat_surface.get_height() * scale) * minimap_size
             view_x = (-offset_x / (sat_surface.get_width() * scale)) * minimap_size + minimap_rect.x
             view_y = minimap_rect.y + (-offset_y / (sat_surface.get_height() * scale)) * minimap_size
             pygame.draw.rect(screen, (255, 255, 0), pygame.Rect(view_x, view_y, view_w, view_h), 1)

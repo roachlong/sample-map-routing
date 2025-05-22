@@ -6,6 +6,7 @@ from collections import deque
 class DQNAgent:
     def __init__(self, state_size, action_size, sequence_length=5):
         self.steps = 0
+        self.episodes = 0
         self.state_size = state_size  # e.g. 4: [ax, ay, gx, gy]
         self.sequence_length = sequence_length  # lookback window
         self.action_size = action_size  # number of available actions
@@ -13,7 +14,6 @@ class DQNAgent:
         self.gamma = 0.9    # discount rate
         self.epsilon = 1.0   # exploration rate
         self.epsilon_min = 0.00
-        self.epsilon_decay = 0.995
         self.learning_rate = 0.001
         self.model = self._build_model()
 
