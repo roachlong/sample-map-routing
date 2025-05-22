@@ -11,7 +11,7 @@ import time
 ADDRESS = "Main Street, Winnett MT 59087, USA"
 DISTANCE = 250
 GRID_SIZE = int(DISTANCE / 2)  # 1 cell per 2 meters
-EPISODES = 89
+EPISODES = 100
 MODEL_PATH = "models/dqn_model_simplified.weights.h5"
 
 # --- ENVIRONMENT WRAPPER ---
