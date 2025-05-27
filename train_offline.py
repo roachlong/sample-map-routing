@@ -11,8 +11,8 @@ import time
 ADDRESS = "Main Street, Winnett MT 59087, USA"
 DISTANCE = 250
 GRID_SIZE = int(DISTANCE / 2)  # 1 cell per 2 meters
-EPISODES = 100
-MODEL_PATH = "models/dqn_model_simplified.weights.h5"
+EPISODES = 1000
+MODEL_PATH = "models/dqn_model.weights.h5"
 
 # --- ENVIRONMENT WRAPPER ---
 class GraphEnv:
@@ -25,7 +25,7 @@ class GraphEnv:
         self.path = None
         self.visited_edges = None
         self.steps = 0
-        self.max_steps = 1000
+        self.max_steps = 25
 
     def reset(self):
         self.goal_pos = self._random_valid(exclude=self.agent_pos)
@@ -56,8 +56,8 @@ class GraphEnv:
             return self._get_state(), -1, True, {}
 
         next_pos = neighbors[action_idx % len(neighbors)]
-        # prev_dist = np.linalg.norm(np.array(self.agent_pos) - np.array(self.goal_pos))
-        # new_dist = np.linalg.norm(np.array(next_pos) - np.array(self.goal_pos))
+        prev_dist = np.linalg.norm(np.array(self.agent_pos) - np.array(self.goal_pos))
+        new_dist = np.linalg.norm(np.array(next_pos) - np.array(self.goal_pos))
 
         #######
         # Each step the agent takes leads to an outcome
@@ -76,11 +76,11 @@ class GraphEnv:
         # i.e. we don't reward for following the A* path because it
         # may conflict with other incentives we use to find the goal.
         #######
-        # reward = (prev_dist - new_dist)  # distance improvement
-        # if reward < 0:
-        #     reward *= 1.2; # punishment for moving further away
+        reward = (prev_dist - new_dist)  # distance improvement
+        if reward < 0:
+            reward *= 1.2; # punishment for moving further away
 
-        reward = -0.5  # step penalty
+        reward -= 0.5  # step penalty
         # reward += loop_penalty  # Apply loop penalty if detected
         # if next_pos in self.path:  # optional A* path bonus
         #     reward += 1 # this reward will confuse the agent
@@ -131,16 +131,19 @@ def rollout_action(agent, env, state_history, depth=5):
                 break
 
             next_next = neighbors_next[action % len(neighbors_next)]
-            prev_dist = np.linalg.norm(np.array(pos) - np.array(env.goal_pos))
+            prev_dist = np.linalg.norm(np.array(env.agent_pos) - np.array(env.goal_pos))
             new_dist = np.linalg.norm(np.array(next_next) - np.array(env.goal_pos))
-            reward = (prev_dist - new_dist)
+            reward = (prev_dist - new_dist)  # distance improvement
             if reward < 0:
-                reward *= 2
+                reward *= 1.2; # punishment for moving further away
+
             reward -= 0.5
+            if next_next == env.goal_pos:
+                reward += 100
 
             edge = (pos, next_next)
             if edge in temp_visited:
-                reward -= 10
+                reward -= 1  # discourage repeat
             else:
                 temp_visited.add(edge)
 
@@ -166,7 +169,7 @@ def train_dqn(grid, connections):
     try:
         agent.load(MODEL_PATH)
         print("✅ Loaded DQN model from file.")
-        meta = np.load("models/agent_meta.npy", allow_pickle=True).item()
+        meta = np.load("models/dqn_meta.npy", allow_pickle=True).item()
         agent.epsilon = meta.get("epsilon", 1.0)
         agent.steps = meta.get("steps", 0)
         agent.episodes = meta.get("episodes", 0)
@@ -186,22 +189,27 @@ def train_dqn(grid, connections):
 
         while not done:
             if len(state_history) < agent.sequence_length:
-                # Pad state_history if it's too short
-                while len(state_history) < agent.sequence_length:
-                    state_history.append(state_history[-1])  # Duplicate the last state
-                    next_state_history.append(next_state_history[-1])
                 action = random.randint(0, agent.action_size - 1)
             else:
                 state_seq = np.stack(state_history, axis=0)
-                action = agent.act(state_seq)
+                # action = agent.act(state_seq)
+                # replaces direct agent.act with rollout to use look ahead planning
+                action = rollout_action(agent, env, state_history, depth=5)
+
+                # # Log agent status
+                # print(f"Agent: {env.agent_pos} | Goal: {env.goal_pos}")
+                # print(f"State: {state_seq[-1]}")
+
+                # # Q-value logging
+                # q_values = agent.model.predict(state_seq[np.newaxis, :, :], verbose=0)[0]
+                # print(f"Q-values: {q_values}")
 
             next_state, reward, done, _ = env.step(action)
             state_history.append(next_state)
-            next_state_history.append(next_state)
 
-            if len(state_history) == agent.sequence_length and len(next_state_history) == agent.sequence_length:
-                state_seq = np.stack(state_history, axis=0)
-                next_state_seq = np.stack(next_state_history, axis=0)
+            if len(state_history) == agent.sequence_length:
+                state_seq = np.stack(list(state_history)[:-1], axis=0)
+                next_state_seq = np.stack(state_history, axis=0)
                 agent.remember(state_seq, action, reward, next_state_seq, done)
 
             for _ in range(3):
@@ -218,7 +226,7 @@ def train_dqn(grid, connections):
 
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
     agent.save(MODEL_PATH)
-    np.save("models/agent_meta.npy", {"epsilon": agent.epsilon, "steps": agent.steps, "episodes": agent.episodes})
+    np.save("models/dqn_meta.npy", {"epsilon": agent.epsilon, "steps": agent.steps, "episodes": agent.episodes})
     print("✅ Model saved to", MODEL_PATH)
 
 
