@@ -180,9 +180,7 @@ def train_dqn(grid, connections):
     for ep in range(EPISODES):
         state = env.reset()
         state_history = deque(maxlen=agent.sequence_length)
-        next_state_history = deque(maxlen=agent.sequence_length)
         state_history.append(state)
-        next_state_history.append(state)
         done = False
         total_reward = 0
         start_time = time.time()
